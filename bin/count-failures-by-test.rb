@@ -30,16 +30,17 @@ class Report
     data = JSON.parse(json)
 
     data.each do |test|
-      failed = test["elements"].any? do |element|
-        element["steps"].any? do |step|
+      test["elements"].each do |element|
+        next if element.fetch('keyword') == 'Background'
+
+        failed = element["steps"].any? do |step|
           step["result"]["status"] != "passed"
         end
-      end
 
-      next unless failed
-      record_failure(file: test.fetch("uri"),
-                     name: test.fetch("name"),
-                     type: :cucumber)
+        next unless failed
+        name = element.fetch('name', 'nil')
+        record_failure(file: test.fetch("uri"), name: name, type: :cucumber)
+      end
     end
   end
 
