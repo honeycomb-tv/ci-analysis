@@ -1,7 +1,9 @@
 #!/usr/bin/env ruby
 
+require "fileutils"
 require "nokogiri"
 require "json"
+require "csv"
 require "pp"
 
 class Report
@@ -24,19 +26,29 @@ class Report
 
   def analyse_cucumber_output(path)
     json = File.read(path)
+    return if json == ""
     data = JSON.parse(json)
 
     data.each do |test|
-      failed = test['elements'].any? do |element|
-        element['steps'].any? do |step|
-          step['result']['status'] != 'passed'
+      failed = test["elements"].any? do |element|
+        element["steps"].any? do |step|
+          step["result"]["status"] != "passed"
         end
       end
 
       next unless failed
-      record_failure(file: test.fetch('uri'),
-                     name: test.fetch('name'),
+      record_failure(file: test.fetch("uri"),
+                     name: test.fetch("name"),
                      type: :cucumber)
+    end
+  end
+
+  def grouped_failures
+    failures.each.with_object({}) do |failure, acc|
+      name = failure.fetch(:name)
+      record = acc.fetch(name, failure.merge(count: 0))
+      record[:count] = record.fetch(:count) + 1
+      acc[name] = record
     end
   end
 
@@ -47,8 +59,41 @@ class Report
   end
 end
 
+start_time = Time.now
 report = Report.new
-report.analyse_rspec_output("./data/platform/2017-02-17T12:38:56Z-rspec.xml")
-report.analyse_cucumber_output('data/platform/2017-04-20T14:17:43Z-cucumber/tests.cucumber')
+cucumber_files = Dir.glob("./data/platform/*cucumber/*")
+rspec_files = Dir.glob("./data/platform/*-rspec.xml")
+total = rspec_files.size + cucumber_files.size
 
-pp report.failures
+puts "#{total} files to process"
+
+cucumber_files.each.with_index do |path, index|
+  puts "#{index + 1}/#{total}: #{path}"
+  report.analyse_cucumber_output(path)
+end
+
+rspec_files.each.with_index do |path, index|
+  puts "#{cucumber_files.size + index + 1}/#{total}: #{path}"
+  report.analyse_rspec_output(path)
+end
+
+puts "Processed #{total} files in #{Time.now - start_time} seconds"
+puts "Writing to ./output/"
+
+FileUtils.mkdir_p("./output")
+File.write("./output/failures.json", report.failures.to_json)
+grouped_failures = report.grouped_failures
+File.write("./output/grouped-failures.json", grouped_failures.to_json)
+
+CSV.open("./output/failure-report.csv", "wb") do |csv|
+  csv << ["name", "file", "type", "number of failures"]
+  grouped_failures.values
+                  .sort_by { |failure| failure.fetch(:count) }
+                  .reverse
+                  .each do |failure|
+    csv << [failure.fetch(:name),
+            failure.fetch(:file),
+            failure.fetch(:type),
+            failure.fetch(:count)]
+  end
+end

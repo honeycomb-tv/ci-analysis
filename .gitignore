@@ -25,3 +25,4 @@ build-iPhoneSimulator/
 build/
 /tmp
 /data
+/output
